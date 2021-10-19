@@ -16,6 +16,8 @@
 #define SOURCE_UTIL_STRING_UTILS_H_
 
 #include <assert.h>
+
+#include <cstring>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -44,9 +46,9 @@ std::string CardinalToOrdinal(size_t cardinal);
 // string will be empty.
 std::pair<std::string, std::string> SplitFlagArgs(const std::string& flag);
 
-// Encodes a string as a sequence of words, using the SPIR-V encoding.
-inline std::vector<uint32_t> MakeVector(std::string input) {
-  std::vector<uint32_t> result;
+// Encodes a string as a sequence of words, using the SPIR-V encoding, appending
+// to an existing vector.
+inline void AppendToVector(const std::string& input, std::vector<uint32_t>* result) {
   uint32_t word = 0;
   size_t num_bytes = input.size();
   // SPIR-V strings are null-terminated.  The byte_index == num_bytes
@@ -56,23 +58,33 @@ inline std::vector<uint32_t> MakeVector(std::string input) {
         (byte_index < num_bytes ? uint8_t(input[byte_index]) : uint8_t(0));
     word |= (new_byte << (8 * (byte_index % sizeof(uint32_t))));
     if (3 == (byte_index % sizeof(uint32_t))) {
-      result.push_back(word);
+      result->push_back(word);
       word = 0;
     }
   }
   // Emit a trailing partial word.
   if ((num_bytes + 1) % sizeof(uint32_t)) {
-    result.push_back(word);
+    result->push_back(word);
   }
+}
+
+// Encodes a string as a sequence of words, using the SPIR-V encoding.
+inline std::vector<uint32_t> MakeVector(const std::string& input) {
+  std::vector<uint32_t> result;
+  AppendToVector(input, &result);
   return result;
 }
 
-// Decode a string from a sequence of words, using the SPIR-V encoding.
-template <class VectorType>
-inline std::string MakeString(const VectorType& words) {
+// Decode a string from a sequence of words between first and last, using the
+// SPIR-V encoding. Assert that a terminating 0-byte was found (unless
+// assertFoundTerminatingNull is passed as false).
+template <class InputIt>
+inline std::string MakeString(InputIt first, InputIt last,
+                              bool assertFoundTerminatingNull = true) {
   std::string result;
 
-  for (uint32_t word : words) {
+  for (InputIt pos = first; pos != last; ++pos) {
+    uint32_t word = *pos;
     for (int byte_index = 0; byte_index < 4; byte_index++) {
       uint32_t extracted_word = (word >> (8 * byte_index)) & 0xFF;
       char c = static_cast<char>(extracted_word);
@@ -82,9 +94,31 @@ inline std::string MakeString(const VectorType& words) {
       result += c;
     }
   }
-  assert(false && "Did not find terminating null for the string.");
+  assert(!assertFoundTerminatingNull &&
+         "Did not find terminating null for the string.");
+  (void)assertFoundTerminatingNull; /* No unused parameters in release builds. */
   return result;
-}  // namespace utils
+}
+
+// Decode a string from a sequence of words in a vector, using the SPIR-V
+// encoding.
+template <class VectorType>
+inline std::string MakeString(const VectorType& words,
+                              bool assertFoundTerminatingNull = true) {
+  return MakeString(words.cbegin(), words.cend(), assertFoundTerminatingNull);
+}
+
+// Decode a string from array words, consuming up to count words, using the
+// SPIR-V encoding.
+inline std::string MakeString(const uint32_t* words, size_t num_words,
+                              bool assertFoundTerminatingNull = true) {
+  return MakeString(words, words + num_words, assertFoundTerminatingNull);
+}
+
+// Check if str starts with prefix (only included since C++20)
+inline bool starts_with(const std::string& str, const char* prefix) {
+  return 0 == str.compare(0, std::strlen(prefix), prefix);
+}
 
 }  // namespace utils
 }  // namespace spvtools
